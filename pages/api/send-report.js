@@ -38,22 +38,30 @@ export default async function handler(req, res) {
 
     // 3) Query: transaction_amount is VARCHAR -> CAST each value then SUM
     const sql = `
-      SELECT 
-    SUM(lp.transaction_amount) AS total_amount, 
-    m.name
+     SELECT 
+  SUM(CAST(lp.transaction_amount AS DECIMAL(15,2))) AS total_amount, 
+  SUBSTRING_INDEX(TRIM(m.name), ' ', 1) AS name
 FROM live_payment lp
 JOIN merchant m 
-    ON lp.created_merchant = m.id
+  ON lp.created_merchant = m.id
 WHERE lp.transaction_status = 'success'
-GROUP BY m.name;
+GROUP BY name;
+
     `;
 
     const [rows] = await pool.execute(sql, [since]);
+
+    // Calculate grand total across all merchants
+    const grandTotal = rows.reduce((sum, r) => {
+      const val = r.total_amount === null ? 0 : Number(r.total_amount);
+      return sum + val;
+    }, 0);
 
     // 4) Build Telegram message
     let message = `✅ Transaction summary (last ${hours} hour${
       hours > 1 ? "s" : ""
     }):\n\n`;
+
     if (!rows.length) {
       message += "No successful transactions in this window.";
     } else {
@@ -67,6 +75,7 @@ GROUP BY m.name;
         const safeName = String(r.name || "Unknown").replace(/\n/g, " ");
         message += `${safeName}: ₹${amt}\n`;
       }
+      message += `\nTotal: ₹${grandTotal.toFixed(2)}`;
     }
 
     // 5) Send to Telegram
